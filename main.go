@@ -12,10 +12,12 @@ import (
 	amqptransport "github.com/go-kit/kit/transport/amqp"
 	"github.com/kokizzu/gotro/L"
 	"github.com/kokizzu/gotro/S"
+	"github.com/kokizzu/gotro/X"
 	"github.com/streadway/amqp"
 )
 
 const (
+	publishIntervalMs              = 100
 	reconnectDelaySec              = 3
 	messageExpirationSeconds int64 = 604800000
 	LocalRabbitMqDSN               = "amqp://guest:guest@127.0.0.1:5672"
@@ -27,6 +29,7 @@ type rmqConfig struct {
 	queue      string
 	routingKey string
 	mtls       *tls.Config
+	debug      bool
 }
 
 func errLabeller(label string) func(error) error {
@@ -35,7 +38,8 @@ func errLabeller(label string) func(error) error {
 	}
 }
 
-func SubscribeRetrier(ctx context.Context, cfg rmqConfig, handler *amqptransport.Subscriber) error {
+// SubscribeRetrier subscribes to queue
+func SubscribeRetrier(ctx context.Context, cfg rmqConfig, handler *amqptransport.Subscriber, subscribeMetric *metric) error {
 	L.Print("SubscribeRetrier: dial amqp...")
 	wrapErr := errLabeller(`main.SubscribeRetrier`)
 	conn, err := dialer(cfg)
@@ -106,13 +110,19 @@ func SubscribeRetrier(ctx context.Context, cfg rmqConfig, handler *amqptransport
 	for {
 		select {
 		case msg := <-messages:
-			processDeliveryFn(&msg)
-
-			if err := msg.Ack(false); err != nil {
-				L.IsError(err, "msg.Ack: acknowledge could not be delivered to the channel")
-			} else {
-				L.Print("message was acknowledged:", string(msg.Body))
-			}
+			subscribeMetric.Measure(func() bool {
+				processDeliveryFn(&msg)
+				if err := msg.Ack(false); err != nil {
+					if cfg.debug {
+						L.IsError(err, "msg.Ack: acknowledge could not be delivered to the channel")
+					}
+					return false
+				}
+				if cfg.debug {
+					L.Print("message was acknowledged:", string(msg.Body))
+				}
+				return true
+			})
 		case err, ok := <-channelNotify:
 			L.Print("SubscribeRetrier: channelNotify closed:", err, ok)
 			return wrapErr(err)
@@ -123,6 +133,7 @@ func SubscribeRetrier(ctx context.Context, cfg rmqConfig, handler *amqptransport
 	}
 }
 
+// dialer dials amqp
 func dialer(cfg rmqConfig) (conn *amqp.Connection, err error) {
 	wrapErr := errLabeller(`main.dialer`)
 	if cfg.mtls != nil {
@@ -139,7 +150,8 @@ func dialer(cfg rmqConfig) (conn *amqp.Connection, err error) {
 	return conn, nil
 }
 
-func PublishRetrier(ctx context.Context, cfg rmqConfig) error {
+// PublishRetrier publish random message every intervalMs
+func PublishRetrier(ctx context.Context, cfg rmqConfig, publishInterval time.Duration, publishMetric *metric) error {
 	L.Print("PublishRetrier: dial amqp...")
 	wrapErr := errLabeller(`main.PublishRetrier`)
 	conn, err := dialer(cfg)
@@ -162,7 +174,7 @@ func PublishRetrier(ctx context.Context, cfg rmqConfig) error {
 
 	channelNotify := ch.NotifyClose(make(chan *amqp.Error))
 	for {
-		ticker := time.NewTicker(time.Second * reconnectDelaySec)
+		ticker := time.NewTicker(publishInterval)
 		select {
 		case <-ctx.Done():
 			L.Print("PublishRetrier: stop publishing amqp status messages")
@@ -172,14 +184,21 @@ func PublishRetrier(ctx context.Context, cfg rmqConfig) error {
 			return wrapErr(err)
 		case <-ticker.C:
 			body := S.RandomCB63(1)
-			err := ch.Publish(cfg.exchange, cfg.routingKey, false, false, amqp.Publishing{
-				Body: []byte(body),
+			publishMetric.Measure(func() bool {
+				err := ch.Publish(cfg.exchange, cfg.routingKey, false, false, amqp.Publishing{
+					Body: []byte(body),
+				})
+				if L.IsError(err, `ch.Publish`) {
+					if cfg.debug {
+						L.Print("PublishRetrier: failed to publish amqp status messages")
+					}
+					return false
+				}
+				if cfg.debug {
+					L.Print("PublishRetrier: publish amqp status message body:", body)
+				}
+				return true
 			})
-			if L.IsError(err, `ch.Publish`) {
-				L.Print("PublishRetrier: failed to publish amqp status messages")
-			} else {
-				L.Print("PublishRetrier: publish amqp status message body:", body)
-			}
 		}
 	}
 
@@ -202,12 +221,23 @@ func main() {
 		L.PanicIf(err, `MtlsConfig`)
 	}
 
+	intervalMsStr := os.Getenv(`PUBLISH_INTERVAL_MS`)
+	publishInterval := publishIntervalMs * time.Millisecond
+	if intervalMsStr != `` {
+		publishInterval = time.Duration(S.ToI(intervalMsStr)) * time.Millisecond
+	}
+	if publishInterval <= 0 { // no delay when publish
+		publishInterval = 1
+	}
+	debug := X.ToBool(os.Getenv(`DEBUG`))
+
 	target := rmqConfig{
 		dsn:        dsn,
 		exchange:   "exchange1",
 		queue:      "queue1",
 		routingKey: "routingKey1",
 		mtls:       mtlsConfig,
+		debug:      debug,
 	}
 
 	handler := amqptransport.NewSubscriber(
@@ -232,7 +262,13 @@ func main() {
 	go func() {
 		<-sig
 		cancel()
+		// just force exit anyway since we don't have anything
+		time.Sleep(time.Second)
+		os.Exit(0)
 	}()
+
+	publishMetric := &metric{}
+	subscribeMetric := &metric{}
 
 	go func() {
 		ticker := time.NewTicker(time.Second * reconnectDelaySec)
@@ -241,8 +277,27 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				err := PublishRetrier(ctx, target)
+				err := PublishRetrier(ctx, target, publishInterval, publishMetric)
 				L.IsError(err, `PublishRetrier`)
+			}
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				fmt.Printf("publish %s (%s), subscribe %s rps (%s) consume ratio: %.1f %%\n",
+					publishMetric.Rps(), // estimated rps, excluding other overhead
+					publishMetric.RealStat(),
+					subscribeMetric.Rps(),
+					subscribeMetric.RealStat(),
+					// if not 100, then must increase the delay
+					float64(subscribeMetric.success*100)/float64(publishMetric.success),
+				)
 			}
 		}
 	}()
@@ -254,7 +309,7 @@ func main() {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			err := SubscribeRetrier(ctx, target, handler)
+			err := SubscribeRetrier(ctx, target, handler, subscribeMetric)
 			L.IsError(err, `SubscribeRetrier`)
 		}
 	}
