@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	publishIntervalMs              = 100
+	publishIntervalMs              = 100_000 // 100 ms between publish
 	reconnectDelaySec              = 3
 	messageExpirationSeconds int64 = 604800000
 	LocalRabbitMqDSN               = "amqp://guest:guest@127.0.0.1:5672"
@@ -221,10 +221,10 @@ func main() {
 		L.PanicIf(err, `MtlsConfig`)
 	}
 
-	intervalMsStr := os.Getenv(`PUBLISH_INTERVAL_MS`)
-	publishInterval := publishIntervalMs * time.Millisecond
+	intervalMsStr := os.Getenv(`PUBLISH_INTERVAL_US`)
+	publishInterval := publishIntervalMs * time.Microsecond
 	if intervalMsStr != `` {
-		publishInterval = time.Duration(S.ToI(intervalMsStr)) * time.Millisecond
+		publishInterval = time.Duration(S.ToI(intervalMsStr)) * time.Microsecond
 	}
 	if publishInterval <= 0 { // no delay when publish
 		publishInterval = 1

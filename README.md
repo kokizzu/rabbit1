@@ -11,8 +11,8 @@ other env options:
 - `CERT` (string)
 - `KEY` (string)
 - `CA_CERT` (string)
-- `PUBLISH_INTERVAL_MS` (int)
-- `DEBUG` (bool)
+- `PUBLISH_INTERVAL_US` (int, microsecond delay between publish)
+- `DEBUG` (bool, print ok/failed publish/subscribe)
 
 note:
 - est rps - estimated rps, excluding delay between publish or subscribe
