@@ -221,7 +221,7 @@ func main() {
 		L.PanicIf(err, `MtlsConfig`)
 	}
 
-	intervalMsStr := os.Getenv(`PUBLISH_INTERVAL_US`)
+	intervalMsStr := os.Getenv(`PUB_INTERVAL_US`)
 	publishInterval := publishIntervalMs * time.Microsecond
 	if intervalMsStr != `` {
 		publishInterval = time.Duration(S.ToI(intervalMsStr)) * time.Microsecond
@@ -283,6 +283,7 @@ func main() {
 		}
 	}()
 
+	L.Print(`PUB_INTERVAL_US:`, publishInterval.Microseconds())
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		for {
@@ -290,7 +291,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				fmt.Printf("publish %s (%s), subscribe %s rps (%s) consume ratio: %.1f %%\n",
+				fmt.Printf("PUB: %s (%s), SUB: %s (%s) consume ratio: %.1f %%\n",
 					publishMetric.Rps(), // estimated rps, excluding other overhead
 					publishMetric.RealStat(),
 					subscribeMetric.Rps(),
@@ -302,15 +303,28 @@ func main() {
 		}
 	}()
 
-	ticker := time.NewTicker(time.Second * reconnectDelaySec)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			err := SubscribeRetrier(ctx, target, handler, subscribeMetric)
-			L.IsError(err, `SubscribeRetrier`)
+	// subscribe
+	subCount := S.ToInt(os.Getenv(`SUB_COUNT`))
+	if subCount <= 0 {
+		subCount = 1
+	}
+	L.Print(`SUB_COUNT:`, subCount)
+
+	subFunc := func() {
+		ticker := time.NewTicker(time.Second * reconnectDelaySec)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				err := SubscribeRetrier(ctx, target, handler, subscribeMetric)
+				L.IsError(err, `SubscribeRetrier`)
+			}
 		}
 	}
+	for z := 0; z < subCount-1; z++ {
+		go subFunc()
+	}
+	subFunc()
 }
