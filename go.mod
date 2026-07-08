@@ -1,11 +1,10 @@
 module rabbitmqtest
 
-go 1.20
+go 1.25.0
 
 require (
 	github.com/go-kit/kit v0.12.0
 	github.com/kokizzu/gotro v1.2918.2038
-	github.com/kpango/fastime v1.1.9
 	github.com/streadway/amqp v1.0.0
 )
 
@@ -29,9 +28,17 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/yosuke-furukawa/json5 v0.1.1 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
-	golang.org/x/crypto v0.9.0 // indirect
+	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20230515195305-f3d0a9c9a5cc // indirect
-	golang.org/x/sys v0.8.0 // indirect
-	golang.org/x/text v0.9.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 )
+
+exclude github.com/docker/docker v24.0.0+incompatible
+
+exclude github.com/docker/cli v24.0.0+incompatible
+
+exclude github.com/opencontainers/runc v1.1.7
+
+exclude github.com/gofiber/fiber/v2 v2.42.0
