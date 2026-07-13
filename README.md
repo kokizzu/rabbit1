@@ -4,7 +4,7 @@
 testing rabbitmq publish, subscribe, reconnect
 
 ```
-RMQ_DSN=amqp://guest:guest@127.0.0.1:5672 go run .
+make run CMD='env RMQ_DSN=amqp://guest:guest@127.0.0.1:5672 go run .'
 ```
 
 other env options:
@@ -18,3 +18,11 @@ other env options:
 note:
 - est rps - estimated rps, excluding delay between publish or subscribe
 - real rps - real rps, including delay between publish or subscribe
+
+## Maintenance checklist
+
+- [x] Go runtime updated to 1.26.5.
+- [x] Go dependencies refreshed and module files tidied.
+- [x] AMQP client moved to the maintained `amqp091-go` API used by current go-kit.
+- [x] `make test` compiles the example without requiring RabbitMQ.
+- [x] `make verify-dependency-security` and `make vulncheck` check dependency security.
