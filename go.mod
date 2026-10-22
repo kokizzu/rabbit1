@@ -1,6 +1,6 @@
 module rabbitmqtest
 
-go 1.26.5
+go 1.26.10
 
 require (
 	github.com/go-kit/kit v0.13.0
