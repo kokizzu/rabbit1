@@ -202,7 +202,6 @@ func PublishRetrier(ctx context.Context, cfg rmqConfig, publishInterval time.Dur
 		}
 	}
 
-	return nil
 }
 
 func main() {
